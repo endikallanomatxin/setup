@@ -335,6 +335,16 @@ fi
 
 
 # ------------------------------------------------------------------------------
+# Tokyo Night tema GNOME Terminal
+# ------------------------------------------------------------------------------
+
+wget -O ~/tokyonight-gnome-terminal.txt \
+  https://raw.githubusercontent.com/bftelman/tokyonight-gnome-terminal/master/tokyonight-gnome-terminal.txt
+
+dconf load /org/gnome/terminal/ < ~/tokyonight-gnome-terminal.txt
+
+
+# ------------------------------------------------------------------------------
 # Podman
 # ------------------------------------------------------------------------------
 
