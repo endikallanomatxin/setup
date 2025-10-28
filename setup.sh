@@ -333,7 +333,26 @@ if-shell "command -v pbcopy >/dev/null 2>&1" \
 TMUX
 fi
 
-sudo apt autoremove -y || true
+
+# ------------------------------------------------------------------------------
+# Podman
+# ------------------------------------------------------------------------------
+
+sudo apt install -y podman podman-compose
+
+mkdir -p "$HOME/.config/containers"
+cat > "$HOME/.config/containers/containers.conf" <<'EOF'
+[engine]
+compose_warning_logs = false
+EOF
+
+
+# ------------------------------------------------------------------------------
+# Cleanup
+# ------------------------------------------------------------------------------
+
+sudo apt autoremove -y
+sudo apt clean
 
 # ==============================================================================
 # 3) FONT: Meslo Nerd Font + GNOME Terminal por defecto
