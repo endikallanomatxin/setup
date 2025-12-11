@@ -52,6 +52,26 @@ has_schema() {
   command -v gsettings >/dev/null 2>&1 || return 1
   gsettings list-schemas 2>/dev/null | grep -qx "$1"
 }
+has_ptyxis() {
+  # 1) Si existe el schema de dconf (instalación nativa)
+  if has_schema "org.gnome.Ptyxis"; then
+    return 0
+  fi
+
+  # 2) Si hay claves en /org/gnome/Ptyxis (Ptyxis ya se ha abierto al menos una vez)
+  if command -v dconf >/dev/null 2>&1 && \
+     dconf list /org/gnome/ 2>/dev/null | grep -q '^Ptyxis/'; then
+    return 0
+  fi
+
+  # 3) Si hay Flatpak de Ptyxis instalado
+  if command -v flatpak >/dev/null 2>&1 && \
+     flatpak list --app 2>/dev/null | grep -q 'app.devsuite.Ptyxis'; then
+    return 0
+  fi
+
+  return 1
+}
 
 # ==============================================================================
 # 2) INSTALLS
@@ -356,28 +376,86 @@ fi
 
 
 # ------------------------------------------------------------------------------
-# Tokyo Night tema GNOME Terminal (solo si existe GNOME Terminal)
+# Tokyo Night instalado según la terminal
+#   - GNOME Terminal (Ubuntu 24)
+#   - GNOME Console (kgx)
+#   - Ptyxis (Ubuntu 25+)
 # ------------------------------------------------------------------------------
 
-if command -v dconf >/dev/null 2>&1 && has_schema "org.gnome.Terminal.ProfilesList"; then
-  echo "[GNOME Terminal] Detectado schema → aplicando tema Tokyo Night"
-  if wget -qO ~/tokyonight-gnome-terminal.txt \
-    https://raw.githubusercontent.com/bftelman/tokyonight-gnome-terminal/master/tokyonight-gnome-terminal.txt; then
+if command -v dconf >/dev/null 2>&1; then
+  if has_schema "org.gnome.Terminal.ProfilesList"; then
+    echo "[GNOME Terminal] Detectado → aplico tema Tokyo Night"
 
-    if ! dconf load /org/gnome/terminal/ < ~/tokyonight-gnome-terminal.txt; then
-      echo "[GNOME Terminal] ⚠ No se ha podido aplicar el tema Tokyo Night (dconf error), pero sigo." >&2
+    # Descarga y aplica la config de Tokyo Night para GNOME Terminal
+    if wget -qO "$HOME/tokyonight-gnome-terminal.txt" \
+      https://raw.githubusercontent.com/bftelman/tokyonight-gnome-terminal/master/tokyonight-gnome-terminal.txt; then
+
+      if ! dconf load /org/gnome/terminal/ < "$HOME/tokyonight-gnome-terminal.txt"; then
+        echo "[GNOME Terminal] ⚠ No se ha podido aplicar Tokyo Night (dconf error), pero sigo." >&2
+      fi
+    else
+      echo "[GNOME Terminal] ⚠ No se ha podido descargar el tema Tokyo Night, pero sigo." >&2
     fi
+
+  elif has_schema "org.gnome.Console"; then
+    echo "[Console] Detectada GNOME Console (kgx) → activo tema oscuro"
+    # Console usa su propia key 'theme' (light / dark / system).
+    gsettings set org.gnome.Console theme 'prefer-dark' || true
+
+  elif has_ptyxis; then
+    echo "[Ptyxis] Detectado Ptyxis → aplico Tokyo Night"
+
+    # 0) Aseguramos paleta Tokyo Night para Ptyxis
+    PTYXIS_PALETTE_DIR="$HOME/.local/share/org.gnome.Ptyxis/palettes"
+    mkdir -p "$PTYXIS_PALETTE_DIR"
+
+    cat > "$PTYXIS_PALETTE_DIR/tokyo-night.palette" <<'EOF'
+[Palette]
+Name=Tokyo Night
+Primary=true
+
+[Dark]
+Background=#1a1b26
+Foreground=#c0caf5
+TitlebarBackground=#1a1b26
+TitlebarForeground=#c0caf5
+Cursor=#c0caf5
+Color0=#15161E
+Color1=#f7768e
+Color2=#9ece6a
+Color3=#e0af68
+Color4=#7aa2f7
+Color5=#bb9af7
+Color6=#7dcfff
+Color7=#a9b1d6
+Color8=#414868
+Color9=#f7768e
+Color10=#9ece6a
+Color11=#e0af68
+Color12=#7aa2f7
+Color13=#bb9af7
+Color14=#7dcfff
+Color15=#c0caf5
+EOF
+
+    # 1) Obtenemos el UUID del perfil por defecto
+    PTYXIS_UUID="$(dconf read /org/gnome/Ptyxis/default-profile-uuid 2>/dev/null | tr -d \')"
+
+    if [ -n "${PTYXIS_UUID:-}" ]; then
+      PROFILE_PATH="org.gnome.Ptyxis.Profile:/org/gnome/Ptyxis/Profiles/${PTYXIS_UUID}/"
+
+      # 2) Asignamos paleta + etiqueta Tokyo Night
+      gsettings set "$PROFILE_PATH" palette 'Tokyo Night' || true
+      gsettings set "$PROFILE_PATH" label 'Tokyo Night' || true
+
+    else
+      echo "[Ptyxis] ⚠ No hay perfil por defecto aún (quizá nunca has abierto Ptyxis) → salto paleta/opacidad." >&2
+    fi
+
   else
-    echo "[GNOME Terminal] ⚠ No se ha podido descargar el tema Tokyo Night, pero sigo." >&2
-  fi
-else
-  if has_schema "org.gnome.Console"; then
-    echo "[Console] Detectada GNOME Console (kgx). No aplico tema Tokyo Night automático porque usa otra config."
-  else
-    echo "[Terminal] No se ha detectado GNOME Terminal ni GNOME Console con schemas conocidos → salto tema Tokyo Night."
+    echo "[Terminal] No se ha detectado GNOME Terminal, GNOME Console ni Ptyxis con schemas conocidos → salto tema Tokyo Night."
   fi
 fi
-
 
 # ------------------------------------------------------------------------------
 # Podman
@@ -393,7 +471,7 @@ EOF
 
 
 # ==============================================================================
-# 3) FONT: Meslo Nerd Font + GNOME Terminal por defecto
+# 3) FONT: Meslo Nerd Font + terminales GNOME
 # ==============================================================================
 
 install_meslo_nerdfont() {
@@ -406,9 +484,9 @@ install_meslo_nerdfont() {
   nerdfont_present() {
     # Si hay fontconfig, mira familias; si no, mira ficheros en destino
     if command -v fc-list >/dev/null 2>&1; then
-      fc-list | grep -qiE "MesloLGS Nerd Font( Mono)?"
+      fc-list | grep -qiE "MesloLGS.*Nerd.*Font"
     else
-      [ -d "$DEST" ] && ls "$DEST"/*MesloLGS*Nerd*Font*.ttf >/dev/null 2>&1
+      [ -d "$DEST" ] && ls "$DEST"/MesloLGS*Nerd*Font*.ttf >/dev/null 2>&1
     fi
   }
 
@@ -454,13 +532,58 @@ install_meslo_nerdfont() {
     fi
 
   elif has_schema "org.gnome.Console"; then
-    # Hay GNOME Console (kgx), pero la config es distinta → no tocamos nada automático.
-    echo "[Fonts] Detectada GNOME Console (kgx). Meslo está instalada; selecciona la fuente manualmente en las preferencias de la terminal."
+    echo "[Fonts] Configurando Meslo en GNOME Console (kgx)…"
+    local WANT_FONT
+    if fc-list | grep -qi "$FAMILY_MONO"; then
+      WANT_FONT="${FAMILY_MONO} 12"
+    else
+      WANT_FONT="${FAMILY} 12"
+    fi
+
+    if gsettings list-keys org.gnome.Console | grep -qx "use-system-font"; then
+      gsettings set org.gnome.Console use-system-font false || true
+    fi
+
+    if gsettings list-keys org.gnome.Console | grep -qx "custom-font"; then
+      gsettings set org.gnome.Console custom-font "$WANT_FONT" || true
+      echo "[Fonts] GNOME Console → ${WANT_FONT}"
+    elif gsettings list-keys org.gnome.Console | grep -qx "font"; then
+      gsettings set org.gnome.Console font "$WANT_FONT" || true
+      echo "[Fonts] GNOME Console (key font) → ${WANT_FONT}"
+    else
+      echo "[Fonts] ⚠ org.gnome.Console no expone ni custom-font ni font; Meslo está instalada pero tendrás que elegirla a mano." >&2
+    fi
+
+  elif has_ptyxis; then
+    echo "[Fonts] Configurando Meslo en Ptyxis…"
+    local WANT_FONT
+    if fc-list | grep -qi "$FAMILY_MONO"; then
+      WANT_FONT="${FAMILY_MONO} 12"
+    else
+      WANT_FONT="${FAMILY} 12"
+    fi
+
+    # Ptyxis tiene font global en org.gnome.Ptyxis
+    gsettings set org.gnome.Ptyxis use-system-font false || true
+    gsettings set org.gnome.Ptyxis font-name "$WANT_FONT" || true
+    echo "[Fonts] Ptyxis → $WANT_FONT"
+
   else
-    echo "[Fonts] No se ha detectado GNOME Terminal ni GNOME Console con schemas conocidos. Meslo está instalada, pero no ajusto ninguna terminal por defecto."
+    echo "[Fonts] No se ha detectado GNOME Terminal, GNOME Console ni Ptyxis con schemas conocidos. Meslo está instalada, pero no ajusto ninguna terminal por defecto."
   fi
 }
+
 install_meslo_nerdfont
+
+# Si estamos en un escritorio GNOME, usa Meslo como monospace global
+if has_cmd gsettings && gsettings list-schemas 2>/dev/null | grep -qx 'org.gnome.desktop.interface'; then
+  if fc-list | grep -qi 'MesloLGS Nerd Font Mono'; then
+    gsettings set org.gnome.desktop.interface monospace-font-name 'MesloLGS Nerd Font Mono 12' || true
+  elif fc-list | grep -qi 'MesloLGS Nerd Font'; then
+    gsettings set org.gnome.desktop.interface monospace-font-name 'MesloLGS Nerd Font 12' || true
+  fi
+  echo "[Fonts] monospace-font-name de GNOME → Meslo"
+fi
 
 # ==============================================================================
 # 4) ESCRITURA FINAL EN ~/.bashrc y ~/.zshrc
