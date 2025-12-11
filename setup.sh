@@ -48,6 +48,10 @@ has_cmd(){ command -v "$1" >/dev/null 2>&1; }
 nv_ver(){ nvim --version 2>/dev/null | sed -n '1{s/.*NVIM v//;s/ .*//;p}'; }
 go_ver(){ go version 2>/dev/null | awk '{print $3}' | sed 's/^go//'; }
 dpkg_ge(){ dpkg --compare-versions "$1" ge "$2"; }  # >=
+has_schema() {
+  command -v gsettings >/dev/null 2>&1 || return 1
+  gsettings list-schemas 2>/dev/null | grep -qx "$1"
+}
 
 # ==============================================================================
 # 2) INSTALLS
@@ -352,13 +356,27 @@ fi
 
 
 # ------------------------------------------------------------------------------
-# Tokyo Night tema GNOME Terminal
+# Tokyo Night tema GNOME Terminal (solo si existe GNOME Terminal)
 # ------------------------------------------------------------------------------
 
-wget -O ~/tokyonight-gnome-terminal.txt \
-  https://raw.githubusercontent.com/bftelman/tokyonight-gnome-terminal/master/tokyonight-gnome-terminal.txt
+if command -v dconf >/dev/null 2>&1 && has_schema "org.gnome.Terminal.ProfilesList"; then
+  echo "[GNOME Terminal] Detectado schema → aplicando tema Tokyo Night"
+  if wget -qO ~/tokyonight-gnome-terminal.txt \
+    https://raw.githubusercontent.com/bftelman/tokyonight-gnome-terminal/master/tokyonight-gnome-terminal.txt; then
 
-dconf load /org/gnome/terminal/ < ~/tokyonight-gnome-terminal.txt
+    if ! dconf load /org/gnome/terminal/ < ~/tokyonight-gnome-terminal.txt; then
+      echo "[GNOME Terminal] ⚠ No se ha podido aplicar el tema Tokyo Night (dconf error), pero sigo." >&2
+    fi
+  else
+    echo "[GNOME Terminal] ⚠ No se ha podido descargar el tema Tokyo Night, pero sigo." >&2
+  fi
+else
+  if has_schema "org.gnome.Console"; then
+    echo "[Console] Detectada GNOME Console (kgx). No aplico tema Tokyo Night automático porque usa otra config."
+  else
+    echo "[Terminal] No se ha detectado GNOME Terminal ni GNOME Console con schemas conocidos → salto tema Tokyo Night."
+  fi
+fi
 
 
 # ------------------------------------------------------------------------------
@@ -377,8 +395,6 @@ EOF
 # ==============================================================================
 # 3) FONT: Meslo Nerd Font + GNOME Terminal por defecto
 # ==============================================================================
-
-sudo apt install -y gnome-terminal
 
 install_meslo_nerdfont() {
   local FONT="Meslo"
@@ -401,28 +417,33 @@ install_meslo_nerdfont() {
   else
     echo "[Fonts] Instalando Meslo Nerd Font…"
     mkdir -p "$DEST"
-    curl -fsSLo "$ZIP" "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/${FONT}.zip"
-    unzip -o "$ZIP" -d "$DEST" >/dev/null
-    rm -f "$ZIP"
-    command -v fc-cache >/dev/null 2>&1 && fc-cache -f || true
-    if nerdfont_present; then
-      echo "[Fonts] Meslo Nerd Font lista ✔"
+    if curl -fsSLo "$ZIP" "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/${FONT}.zip"; then
+      unzip -o "$ZIP" -d "$DEST" >/dev/null
+      rm -f "$ZIP"
+      command -v fc-cache >/dev/null 2>&1 && fc-cache -f || true
+      if nerdfont_present; then
+        echo "[Fonts] Meslo Nerd Font lista ✔"
+      else
+        echo "[Fonts] ⚠ No se detecta la fuente tras instalar (revisa $DEST)" >&2
+      fi
     else
-      echo "[Fonts] ⚠ No se detecta la fuente tras instalar (revisa $DEST)" >&2
+      echo "[Fonts] ⚠ No se ha podido descargar la Nerd Font Meslo, pero sigo." >&2
     fi
   fi
 
-  # Ajusta fuente por defecto en GNOME Terminal solo si es distinto
-  if command -v gsettings >/dev/null 2>&1; then
+  # Si hay GNOME Terminal, intenta ajustar fuente por defecto
+  if has_schema "org.gnome.Terminal.ProfilesList"; then
+    echo "[Fonts] Configurando Meslo en GNOME Terminal…"
     local PROF_ID PROF_PATH CURR_FONT WANT_FONT
     PROF_ID="$(gsettings get org.gnome.Terminal.ProfilesList default | tr -d \')"
     PROF_PATH="org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:${PROF_ID}/"
-    # Prefiere la Mono si existe
+
     if fc-list | grep -qi "$FAMILY_MONO"; then
       WANT_FONT="${FAMILY_MONO} 12"
     else
       WANT_FONT="${FAMILY} 12"
     fi
+
     CURR_FONT="$(gsettings get "$PROF_PATH" font 2>/dev/null || echo '')"
     if [ "$CURR_FONT" != "'$WANT_FONT'" ]; then
       gsettings set "$PROF_PATH" use-system-font false || true
@@ -431,6 +452,12 @@ install_meslo_nerdfont() {
     else
       echo "[Fonts] GNOME Terminal ya usa ${WANT_FONT} → OK"
     fi
+
+  elif has_schema "org.gnome.Console"; then
+    # Hay GNOME Console (kgx), pero la config es distinta → no tocamos nada automático.
+    echo "[Fonts] Detectada GNOME Console (kgx). Meslo está instalada; selecciona la fuente manualmente en las preferencias de la terminal."
+  else
+    echo "[Fonts] No se ha detectado GNOME Terminal ni GNOME Console con schemas conocidos. Meslo está instalada, pero no ajusto ninguna terminal por defecto."
   fi
 }
 install_meslo_nerdfont
