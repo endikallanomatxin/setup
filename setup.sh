@@ -236,10 +236,15 @@ fi
 
 STAR_CFG="$HOME/.config/starship.toml"
 mkdir -p "$HOME/.config"
-if [ -f "$STAR_CFG" ]; then
-  cp -f "$STAR_CFG" "$STAR_CFG.bak"
+
+if has_cmd starship; then
+  if [ -f "$STAR_CFG" ]; then
+    cp -f "$STAR_CFG" "$STAR_CFG.bak"
+  fi
+  starship preset nerd-font-symbols -o "$STAR_CFG"
+else
+  echo "[Starship] No se ha encontrado starship tras intentar instalarlo → no genero starship.toml"
 fi
-starship preset nerd-font-symbols -o ~/.config/starship.toml
 
 # Starship init en cada shell
 append_bash <<'EOF'
@@ -369,16 +374,12 @@ compose_warning_logs = false
 EOF
 
 
-# ------------------------------------------------------------------------------
-# Cleanup
-# ------------------------------------------------------------------------------
-
-sudo apt autoremove -y
-sudo apt clean
-
 # ==============================================================================
 # 3) FONT: Meslo Nerd Font + GNOME Terminal por defecto
 # ==============================================================================
+
+sudo apt install -y gnome-terminal
+
 install_meslo_nerdfont() {
   local FONT="Meslo"
   local DEST="$HOME/.local/share/fonts/NerdFonts/${FONT}"
@@ -439,5 +440,12 @@ install_meslo_nerdfont
 # ==============================================================================
 write_managed_block "$HOME/.bashrc" "$BASH_RC"
 write_managed_block "$HOME/.zshrc"  "$ZSH_RC"
+
+# ==============================================================================
+# 5) CLEANUP
+# ==============================================================================
+
+sudo apt autoremove -y
+sudo apt clean
 
 echo "✅ Setup finalizado."
