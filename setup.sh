@@ -215,9 +215,21 @@ EOF
 # ------------------------------------------------------------------------------
 # STARSHIP → descarga solo si falta; escribe config cada vez (con backup)
 # ------------------------------------------------------------------------------
+# intenta instalador oficial y cae en apt si falla
 if ! has_cmd starship; then
-  echo "[Starship] Instalando…"
-  curl -fsSL https://starship.rs/install.sh | sh -s -- -y
+  echo "[Starship] Instalando… (primero instalador oficial, luego apt si hace falta)"
+
+  # intentamos el instalador oficial, pero SIN romper el script si falla
+  if ! curl -fsSL https://starship.rs/install.sh | sh -s -- -y; then
+    echo "[Starship] Instalador oficial ha fallado, probando con apt…" >&2
+
+    if sudo apt install -y starship; then
+      echo "[Starship] Instalado desde apt ✔"
+    else
+      echo "[Starship] ❌ No se ha podido instalar Starship ni con el instalador oficial ni con apt." >&2
+      echo "[Starship] El script seguirá sin Starship." >&2
+    fi
+  fi
 else
   echo "[Starship] Ya instalado → OK ($(starship --version))"
 fi
