@@ -140,30 +140,34 @@ fi
 # ------------------------------------------------------------------------------
 # NODE + NPM (nvm) → instala nvm si falta y Node 22 si no está
 # ------------------------------------------------------------------------------
-if [ ! -s "$HOME/.nvm/nvm.sh" ]; then
+export NVM_DIR="$HOME/.nvm"
+
+if [ ! -s "$NVM_DIR/nvm.sh" ]; then
   echo "[nvm] Instalando nvm…"
   curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 fi
-# Carga nvm en esta sesión
-. "$HOME/.nvm/nvm.sh"
 
-# Instala Node 22 si no lo tienes
-NODE_TARGET_MAJOR=22
-NODE_CURR="$(node -v 2>/dev/null || true)"  # v22.21.0
-if [[ ! "$NODE_CURR" =~ ^v${NODE_TARGET_MAJOR}\. ]]; then
-  echo "[Node] Instalando Node $NODE_TARGET_MAJOR con nvm…"
-  nvm install "$NODE_TARGET_MAJOR"
+# nvm.sh puede fallar con set -e y además hace auto-use; lo evitamos
+set +e
+set +u
+. "$NVM_DIR/nvm.sh" --no-use
+nvm_rc=$?
+set -u
+set -e
+
+if [ "$nvm_rc" -ne 0 ]; then
+  echo "[nvm] ⚠ No se pudo cargar nvm (rc=$nvm_rc). Salto Node." >&2
 else
-  echo "[Node] Ya en $NODE_CURR → OK"
+  NODE_TARGET_MAJOR=22
+  NODE_CURR="$(node -v 2>/dev/null || true)"
+  if [[ ! "$NODE_CURR" =~ ^v${NODE_TARGET_MAJOR}\. ]]; then
+    echo "[Node] Instalando Node $NODE_TARGET_MAJOR con nvm…"
+    nvm install "$NODE_TARGET_MAJOR"
+  else
+    echo "[Node] Ya en $NODE_CURR → OK"
+  fi
+  node -v && npm -v
 fi
-node -v && npm -v
-
-# RC para nvm en ambas shells
-append_both <<'EOF'
-# nvm (Node)
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-EOF
 
 # ------------------------------------------------------------------------------
 # GO (desde go.dev) → descarga solo si la instalada < latest
@@ -297,7 +301,7 @@ EOF
 # ------------------------------------------------------------------------------
 # TMUX (opcional)
 # ------------------------------------------------------------------------------
-sudo apt install tmux
+sudo apt install tmux -y
 
 if [ ! -f "$HOME/.tmux.conf" ]; then
   cat > "$HOME/.tmux.conf" <<'TMUX'
