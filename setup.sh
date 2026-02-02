@@ -1,20 +1,75 @@
 #!/usr/bin/env bash
 
 # ——— Guardias de ejecución ———
-# 1) Debe ejecutarse con Bash (no zsh/sh/fish, etc.)
 if [ -z "${BASH_VERSION:-}" ]; then
-  echo "Este script está pensado para Bash. Ejecútalo así:  bash installs.sh  (no 'sh' ni 'zsh')." >&2
-  # Si fue 'source', intenta return; si no, exit.
+  echo "Este script está pensado para Bash. Ejecútalo así:  bash setup.sh  (no 'sh' ni 'zsh')." >&2
   return 1 2>/dev/null || exit 1
 fi
 
-# 2) No debe ejecutarse con 'source' ni '.'
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then
-  echo "No 'source' este script. Ejecútalo así:  bash installs.sh" >&2
+  echo "No 'source' este script. Ejecútalo así:  bash setup.sh" >&2
   return 1 2>/dev/null || exit 1
 fi
 
 set -euo pipefail
+
+# ==============================================================================
+# 0) DETECCIÓN DE DISTRO + ABSTRACCIÓN DE PAQUETES
+# ==============================================================================
+OS_ID=""
+OS_LIKE=""
+if [ -r /etc/os-release ]; then
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  OS_ID="${ID:-}"
+  OS_LIKE="${ID_LIKE:-}"
+fi
+
+is_ubuntu_like() { [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" || "$OS_LIKE" == *debian* ]]; }
+is_fedora_like() { [[ "$OS_ID" == "fedora" || "$OS_LIKE" == *fedora* || "$OS_LIKE" == *rhel* ]]; }
+
+if ! is_ubuntu_like && ! is_fedora_like; then
+  echo "Distro no soportada (ID=$OS_ID ID_LIKE=$OS_LIKE). Solo Ubuntu/Debian y Fedora/RHEL-like." >&2
+  exit 1
+fi
+
+PKG_MGR=""
+if is_ubuntu_like; then PKG_MGR="apt"; else PKG_MGR="dnf"; fi
+
+pkg_update() {
+  if [ "$PKG_MGR" = "apt" ]; then
+    sudo apt update -y
+  else
+    sudo dnf -y upgrade --refresh || true
+    # Nota: dnf no necesita update separado; el refresh ya trae metadata.
+  fi
+}
+
+pkg_upgrade() {
+  if [ "$PKG_MGR" = "apt" ]; then
+    sudo apt upgrade -y
+  else
+    sudo dnf -y upgrade
+  fi
+}
+
+pkg_install() {
+  if [ "$PKG_MGR" = "apt" ]; then
+    sudo apt install -y "$@"
+  else
+    sudo dnf install -y "$@"
+  fi
+}
+
+pkg_autoremove_clean() {
+  if [ "$PKG_MGR" = "apt" ]; then
+    sudo apt autoremove -y
+    sudo apt clean
+  else
+    sudo dnf autoremove -y || true
+    sudo dnf clean all -y || true
+  fi
+}
 
 # ==============================================================================
 # 1) RC ACCUMULATORS + HELPERS
@@ -47,50 +102,87 @@ write_managed_block() {  # write_managed_block <file> <content>
 has_cmd(){ command -v "$1" >/dev/null 2>&1; }
 nv_ver(){ nvim --version 2>/dev/null | sed -n '1{s/.*NVIM v//;s/ .*//;p}'; }
 go_ver(){ go version 2>/dev/null | awk '{print $3}' | sed 's/^go//'; }
-dpkg_ge(){ dpkg --compare-versions "$1" ge "$2"; }  # >=
+
+ver_ge() { # ver_ge <a> <b>  (true si a >= b)
+  # sort -V está en coreutils en Ubuntu y Fedora
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]
+}
+
 has_schema() {
   command -v gsettings >/dev/null 2>&1 || return 1
   gsettings list-schemas 2>/dev/null | grep -qx "$1"
 }
 has_ptyxis() {
-  # 1) Si existe el schema de dconf (instalación nativa)
   if has_schema "org.gnome.Ptyxis"; then
     return 0
   fi
-
-  # 2) Si hay claves en /org/gnome/Ptyxis (Ptyxis ya se ha abierto al menos una vez)
   if command -v dconf >/dev/null 2>&1 && \
      dconf list /org/gnome/ 2>/dev/null | grep -q '^Ptyxis/'; then
     return 0
   fi
-
-  # 3) Si hay Flatpak de Ptyxis instalado
   if command -v flatpak >/dev/null 2>&1 && \
      flatpak list --app 2>/dev/null | grep -q 'app.devsuite.Ptyxis'; then
     return 0
   fi
-
   return 1
 }
 
 # ==============================================================================
-# 2) INSTALLS
+# 2) INSTALLS BASE
 # ==============================================================================
+pkg_update
+pkg_upgrade
 
-sudo apt update -y
-sudo apt upgrade -y
+# Paquetes comunes (nombres varían en Fedora)
+if is_ubuntu_like; then
+  pkg_install \
+    git curl make unzip gcc ripgrep xclip zsh \
+    zsh-syntax-highlighting zsh-autosuggestions \
+    eza fontconfig tmux podman podman-compose \
+    pipx
+  # Wayland clipboard opcional
+  pkg_install wl-clipboard || true
+else
+  # Fedora
+  pkg_install \
+    git curl make unzip gcc ripgrep xclip zsh \
+    zsh-syntax-highlighting zsh-autosuggestions \
+    eza fontconfig tmux podman \
+    python3-pipx
+  # En Fedora, podman-compose puede no venir por defecto; intentamos ambos
+  pkg_install podman-compose || pkg_install python3-podman-compose || true
+  pkg_install wl-clipboard || true
+fi
 
-# BASICS
-sudo apt install -y git curl make unzip gcc ripgrep xclip zsh zsh-syntax-highlighting zsh-autosuggestions eza fontconfig
+# ==============================================================================
+# 3) NEOVIM estable 0.11.x (cross-distro)
+#   - Preferimos tarball oficial y symlink en /usr/local/bin
+# ==============================================================================
+install_neovim_stable_011() {
+  local want_major_minor="0.11"
+  local arch="x86_64"
+  local url="https://github.com/neovim/neovim-releases/releases/latest/download/nvim-linux-${arch}.tar.gz"
+  local tmp="/tmp/nvim-linux-${arch}.tar.gz"
+  local dst="/opt/nvim"
 
-# ------------------------------------------------------------------------------
-# NEOVIM (instala solo si NO es la estable 0.11.x)
-# ------------------------------------------------------------------------------
-install_neovim_stable_011(){
-  curl -fsSLO "https://github.com/neovim/neovim-releases/releases/latest/download/nvim-linux-x86_64.deb"
-  sudo apt install -y ./nvim-linux-x86_64.deb
-  rm -f ./nvim-linux-x86_64.deb
+  echo "[Neovim] Descargando desde: $url"
+  curl -fsSLo "$tmp" "$url"
+
+  sudo rm -rf "$dst"
+  sudo mkdir -p "$dst"
+  sudo tar -xzf "$tmp" -C /opt
+  rm -f "$tmp"
+
+  # El tar trae /opt/nvim-linux-x86_64; lo normalizamos a /opt/nvim
+  if [ -d "/opt/nvim-linux-${arch}" ]; then
+    sudo rm -rf "$dst"
+    sudo mv "/opt/nvim-linux-${arch}" "$dst"
+  fi
+
+  sudo ln -sf "$dst/bin/nvim" /usr/local/bin/nvim
+  echo "[Neovim] Instalado en $dst y symlink /usr/local/bin/nvim"
 }
+
 NV_CURR="$(nv_ver || true)"
 if [[ ! "$NV_CURR" =~ ^0\.11\. ]]; then
   echo "[Neovim] Instalando estable 0.11.x (actual: ${NV_CURR:-no instalado})"
@@ -99,57 +191,56 @@ else
   echo "[Neovim] Ya en 0.11.x → OK ($NV_CURR)"
 fi
 
-# Config de Neovim (clona solo si falta)
+# Config de Neovim
 mkdir -p "$HOME/.config"
-cd "$HOME/.config"
-if [ ! -d nvim ]; then
-  git clone https://github.com/endikallanomatxin/nvim.git
+if [ ! -d "$HOME/.config/nvim" ]; then
+  git clone https://github.com/endikallanomatxin/nvim.git "$HOME/.config/nvim"
 else
   echo "[Neovim] ~/.config/nvim ya existe → skip clone"
 fi
-cd ~/
 
-# For djlint
-sudo apt install pipx -y
-pipx install djlint
+# ==============================================================================
+# 4) pipx: djlint + PATH
+# ==============================================================================
+# (pipx ya instalado via paquete)
+pipx ensurepath >/dev/null 2>&1 || true
+pipx install djlint || true
 
 append_both <<'EOF'
 # Binarios de usuario (pipx, pip --user, etc.)
 export PATH="$HOME/.local/bin:$PATH"
 EOF
 
-# --- Git editor por defecto Neovim ---------------------------------------
-# 1) Variables de entorno para todas las shells
+# ==============================================================================
+# 5) Editor por defecto + Git
+# ==============================================================================
 append_both <<'EOF'
 # Editor por defecto
 export VISUAL="nvim"
 export EDITOR="$VISUAL"
 EOF
 
-# 2) Config global de Git (solo si no estaba definida)
-if command -v nvim >/dev/null 2>&1; then
+if has_cmd nvim; then
   if ! git config --global --get core.editor >/dev/null; then
     git config --global core.editor "nvim"
   fi
-  # Opcional: asegurar editor para rebase interactivo
   if ! git config --global --get sequence.editor >/dev/null; then
     git config --global sequence.editor "nvim"
   fi
 fi
 
-# ------------------------------------------------------------------------------
-# NODE + NPM (nvm) → instala nvm si falta y Node 22 si no está
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# 6) NODE + NPM (nvm)
+# ==============================================================================
 export NVM_DIR="$HOME/.nvm"
-
 if [ ! -s "$NVM_DIR/nvm.sh" ]; then
   echo "[nvm] Instalando nvm…"
   curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 fi
 
-# nvm.sh puede fallar con set -e y además hace auto-use; lo evitamos
 set +e
 set +u
+# shellcheck disable=SC1091
 . "$NVM_DIR/nvm.sh" --no-use
 nvm_rc=$?
 set -u
@@ -169,13 +260,14 @@ else
   node -v && npm -v
 fi
 
-# ------------------------------------------------------------------------------
-# GO (desde go.dev) → descarga solo si la instalada < latest
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# 7) GO (go.dev) → instala solo si la instalada < latest
+# ==============================================================================
 GO_LATEST_RAW="$(curl -fsSL "https://go.dev/VERSION?m=text" | head -n1 | tr -d '\r')"  # ej: go1.25.3
 GO_LATEST="${GO_LATEST_RAW#go}"
 GO_CURR="$(go_ver || echo 0)"
-if has_cmd go && dpkg_ge "$GO_CURR" "$GO_LATEST"; then
+
+if has_cmd go && ver_ge "$GO_CURR" "$GO_LATEST"; then
   echo "[Go] Ya en $GO_CURR (>= $GO_LATEST) → OK"
 else
   echo "[Go] Instalando $GO_LATEST_RAW… (actual: $GO_CURR)"
@@ -184,44 +276,41 @@ else
   sudo tar -C /usr/local -xzf /tmp/go.tgz
   rm -f /tmp/go.tgz
 fi
+
 export GOPATH="${GOPATH:-$HOME/go}"
 export PATH="/usr/local/go/bin:$GOPATH/bin:$PATH"
 go version
 
-# PATH de Go en ambas shells
 append_both <<'EOF'
 # Go
 export GOPATH="${GOPATH:-$HOME/go}"
 export PATH="/usr/local/go/bin:$GOPATH/bin:$PATH"
 EOF
 
-# ------------------------------------------------------------------------------
-# RUST (rustup) → instala rustup si falta; si existe, no descarga de nuevo
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# 8) RUST (rustup)
+# ==============================================================================
 if ! has_cmd rustup; then
   echo "[Rustup] Instalando rustup…"
   curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y
 fi
-# Carga entorno en esta sesión
+# shellcheck disable=SC1091
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
-# Asegura componentes (idempotente)
 rustup component add rustfmt clippy rust-analyzer >/dev/null || true
 rustc --version && cargo --version && (rust-analyzer --version || true)
 
-# RC de Rust en ambas shells
 append_both <<'EOF'
 # Rust
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 EOF
 
-# ------------------------------------------------------------------------------
-# ZSH + plugins (apt ya lo ha instalado arriba). Asegura login shell zsh.
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# 9) ZSH + plugins (ya instalados arriba). Asegura login shell zsh.
+# ==============================================================================
 if [ "$(getent passwd "$USER" | cut -d: -f7)" != "/usr/bin/zsh" ]; then
   chsh -s /usr/bin/zsh || true
 fi
 
-# Bloque ZSH (historial, compinit, autosuggestions)
 append_zsh <<'EOF'
 # Historial zsh + opciones
 export HISTFILE="$HOME/.zsh_history"
@@ -234,29 +323,23 @@ autoload -Uz compinit
 compinit
 
 # Autosuggestions (highlight al final del archivo)
-source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+# Ubuntu/Fedora suelen usar estas rutas:
+if [ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]; then
+  source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+fi
 ZSH_AUTOSUGGEST_USE_ASYNC=1
 ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
 EOF
 
-# ------------------------------------------------------------------------------
-# STARSHIP → descarga solo si falta; escribe config cada vez (con backup)
-# ------------------------------------------------------------------------------
-# intenta instalador oficial y cae en apt si falla
+# ==============================================================================
+# 10) STARSHIP
+# ==============================================================================
 if ! has_cmd starship; then
-  echo "[Starship] Instalando… (primero instalador oficial, luego apt si hace falta)"
-
-  # intentamos el instalador oficial, pero SIN romper el script si falla
+  echo "[Starship] Instalando… (instalador oficial; si falla, paquetizado)"
   if ! curl -fsSL https://starship.rs/install.sh | sh -s -- -y; then
-    echo "[Starship] Instalador oficial ha fallado, probando con apt…" >&2
-
-    if sudo apt install -y starship; then
-      echo "[Starship] Instalado desde apt ✔"
-    else
-      echo "[Starship] ❌ No se ha podido instalar Starship ni con el instalador oficial ni con apt." >&2
-      echo "[Starship] El script seguirá sin Starship." >&2
-    fi
+    echo "[Starship] Instalador oficial falló; probando con $PKG_MGR…" >&2
+    pkg_install starship || true
   fi
 else
   echo "[Starship] Ya instalado → OK ($(starship --version))"
@@ -266,43 +349,42 @@ STAR_CFG="$HOME/.config/starship.toml"
 mkdir -p "$HOME/.config"
 
 if has_cmd starship; then
-  if [ -f "$STAR_CFG" ]; then
-    cp -f "$STAR_CFG" "$STAR_CFG.bak"
-  fi
+  [ -f "$STAR_CFG" ] && cp -f "$STAR_CFG" "$STAR_CFG.bak"
   starship preset nerd-font-symbols -o "$STAR_CFG"
 else
-  echo "[Starship] No se ha encontrado starship tras intentar instalarlo → no genero starship.toml"
+  echo "[Starship] No se ha encontrado starship → no genero starship.toml"
 fi
 
-# Starship init en cada shell
 append_bash <<'EOF'
 # Starship en bash
 if command -v starship >/dev/null 2>&1; then
   eval "$(starship init bash)"
 fi
 EOF
+
 append_zsh <<'EOF'
 # Starship en zsh (antes de syntax-highlighting)
 if command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
 fi
-# Syntax highlighting SIEMPRE al final
-source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# Syntax highlighting SIEMPRE al final (Ubuntu/Fedora suelen usar esta ruta):
+if [ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]; then
+  source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+fi
 EOF
 
-# ------------------------------------------------------------------------------
-# EZA → alias ls
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# 11) EZA → alias ls
+# ==============================================================================
 append_both <<'EOF'
 # eza en lugar de ls
 alias ls='eza'
 EOF
 
-# ------------------------------------------------------------------------------
-# TMUX (opcional)
-# ------------------------------------------------------------------------------
-sudo apt install tmux -y
-
+# ==============================================================================
+# 12) TMUX (config)
+# ==============================================================================
 if [ ! -f "$HOME/.tmux.conf" ]; then
   cat > "$HOME/.tmux.conf" <<'TMUX'
 ##### Terminal y color verdadero ###############################################
@@ -332,84 +414,62 @@ bind -r K resize-pane -U 5
 bind -r L resize-pane -R 5
 
 ##### Tokyo Night colors #######################################################
-# Paleta: bg #1a1b26, fg #c0caf5, blue #7aa2f7, cyan #7dcfff, magenta #bb9af7
-# green #9ece6a, yellow #e0af68, red #f7768e, orange #ff9e64, grey #565f89
 set -g status on
 set -g status-interval 5
 set -g status-justify centre
 set -g status-style "bg=#1a1b26,fg=#c0caf5"
 
-# Izquierda / derecha
 set -g status-left ""
 set -g status-right  "#[bold]#S #[fg=#7aa2f7]#[default] #I:#W "
 set -g status-justify left
 
-# Ventanas (pestañas)
 setw -g window-status-separator ""
 setw -g window-status-format         " #[fg=#565f89]#I #[fg=#c0caf5]#W "
 setw -g window-status-current-format "#[bg=#7aa2f7,fg=#1a1b26,bold] #I #W #[default]"
 
-# Bordes panel
 set -g pane-border-style        "fg=#3b4261"
 set -g pane-active-border-style "fg=#7aa2f7"
 
-# Mensajes / prompts / copy-mode (sin 'command-prompt-style' para compatibilidad)
 set -g message-style         "bg=#1f2335,fg=#c0caf5"
 set -g message-command-style "bg=#1f2335,fg=#c0caf5"
 set -g mode-style            "bg=#33467c,fg=#c0caf5"
 
-##### Opcional: títulos en borde (tmux >= 3.2) #################################
-# set -g pane-border-status top
-# set -g pane-border-format " #[fg=#a6adc8]#{pane_index}#[default] #{pane_current_command} "
-
 ##### Copia al portapapeles #########################################
-# For X11:
+# X11:
 bind -T copy-mode-vi MouseDragEnd1Pane send -X copy-pipe-and-cancel "xclip -selection clipboard -in"
 bind -T copy-mode    MouseDragEnd1Pane send -X copy-pipe-and-cancel "xclip -selection clipboard -in"
-# For wayland:
-# bind -T copy-mode-vi MouseDragEnd1Pane send -X copy-pipe-and-cancel "wl-copy"
-# bind -T copy-mode    MouseDragEnd1Pane send -X copy-pipe-and-cancel "wl-copy"
-
 if-shell "command -v xclip >/dev/null 2>&1" \
   'bind -T copy-mode-vi y send -X copy-pipe-and-cancel "xclip -sel clip -i"'
-if-shell "command -v pbcopy >/dev/null 2>&1" \
-  'bind -T copy-mode-vi y send -X copy-pipe-and-cancel "pbcopy"'
 
+# Wayland (si quieres):
+# if-shell "command -v wl-copy >/dev/null 2>&1" \
+#   'bind -T copy-mode-vi y send -X copy-pipe-and-cancel "wl-copy"'
 TMUX
 fi
 
-
-# ------------------------------------------------------------------------------
-# Tokyo Night instalado según la terminal
-#   - GNOME Terminal (Ubuntu 24)
-#   - GNOME Console (kgx)
-#   - Ptyxis (Ubuntu 25+)
-# ------------------------------------------------------------------------------
-
+# ==============================================================================
+# 13) Tokyo Night según terminal GNOME
+# ==============================================================================
 if command -v dconf >/dev/null 2>&1; then
   if has_schema "org.gnome.Terminal.ProfilesList"; then
-    echo "[GNOME Terminal] Detectado → aplico tema Tokyo Night"
+    echo "[GNOME Terminal] Detectado → aplico Tokyo Night"
 
-    # Descarga y aplica la config de Tokyo Night para GNOME Terminal
-    if wget -qO "$HOME/tokyonight-gnome-terminal.txt" \
+    if curl -fsSLo "$HOME/tokyonight-gnome-terminal.txt" \
       https://raw.githubusercontent.com/bftelman/tokyonight-gnome-terminal/master/tokyonight-gnome-terminal.txt; then
-
       if ! dconf load /org/gnome/terminal/ < "$HOME/tokyonight-gnome-terminal.txt"; then
         echo "[GNOME Terminal] ⚠ No se ha podido aplicar Tokyo Night (dconf error), pero sigo." >&2
       fi
     else
-      echo "[GNOME Terminal] ⚠ No se ha podido descargar el tema Tokyo Night, pero sigo." >&2
+      echo "[GNOME Terminal] ⚠ No se ha podido descargar Tokyo Night, pero sigo." >&2
     fi
 
   elif has_schema "org.gnome.Console"; then
     echo "[Console] Detectada GNOME Console (kgx) → activo tema oscuro"
-    # Console usa su propia key 'theme' (light / dark / system).
     gsettings set org.gnome.Console theme 'prefer-dark' || true
 
   elif has_ptyxis; then
-    echo "[Ptyxis] Detectado Ptyxis → aplico Tokyo Night"
+    echo "[Ptyxis] Detectado → aplico Tokyo Night"
 
-    # 0) Aseguramos paleta Tokyo Night para Ptyxis
     PTYXIS_PALETTE_DIR="$HOME/.local/share/org.gnome.Ptyxis/palettes"
     mkdir -p "$PTYXIS_PALETTE_DIR"
 
@@ -442,42 +502,31 @@ Color14=#7dcfff
 Color15=#c0caf5
 EOF
 
-    # 1) Obtenemos el UUID del perfil por defecto
     PTYXIS_UUID="$(dconf read /org/gnome/Ptyxis/default-profile-uuid 2>/dev/null | tr -d \')"
-
     if [ -n "${PTYXIS_UUID:-}" ]; then
       PROFILE_PATH="org.gnome.Ptyxis.Profile:/org/gnome/Ptyxis/Profiles/${PTYXIS_UUID}/"
-
-      # 2) Asignamos paleta + etiqueta Tokyo Night
       gsettings set "$PROFILE_PATH" palette 'Tokyo Night' || true
       gsettings set "$PROFILE_PATH" label 'Tokyo Night' || true
-
     else
-      echo "[Ptyxis] ⚠ No hay perfil por defecto aún (quizá nunca has abierto Ptyxis) → salto paleta/opacidad." >&2
+      echo "[Ptyxis] ⚠ No hay perfil por defecto aún (abre Ptyxis una vez) → salto ajustes del perfil." >&2
     fi
-
   else
-    echo "[Terminal] No se ha detectado GNOME Terminal, GNOME Console ni Ptyxis con schemas conocidos → salto tema Tokyo Night."
+    echo "[Terminal] No detecto GNOME Terminal / Console / Ptyxis → salto tema."
   fi
 fi
 
-# ------------------------------------------------------------------------------
-# Podman
-# ------------------------------------------------------------------------------
-
-sudo apt install -y podman podman-compose
-
+# ==============================================================================
+# 14) Podman: config
+# ==============================================================================
 mkdir -p "$HOME/.config/containers"
 cat > "$HOME/.config/containers/containers.conf" <<'EOF'
 [engine]
 compose_warning_logs = false
 EOF
 
-
 # ==============================================================================
-# 3) FONT: Meslo Nerd Font + terminales GNOME
+# 15) Fonts: Meslo Nerd Font + terminales GNOME
 # ==============================================================================
-
 install_meslo_nerdfont() {
   local FONT="Meslo"
   local DEST="$HOME/.local/share/fonts/NerdFonts/${FONT}"
@@ -486,7 +535,6 @@ install_meslo_nerdfont() {
   local FAMILY="MesloLGS Nerd Font"
 
   nerdfont_present() {
-    # Si hay fontconfig, mira familias; si no, mira ficheros en destino
     if command -v fc-list >/dev/null 2>&1; then
       fc-list | grep -qiE "MesloLGS.*Nerd.*Font"
     else
@@ -509,11 +557,10 @@ install_meslo_nerdfont() {
         echo "[Fonts] ⚠ No se detecta la fuente tras instalar (revisa $DEST)" >&2
       fi
     else
-      echo "[Fonts] ⚠ No se ha podido descargar la Nerd Font Meslo, pero sigo." >&2
+      echo "[Fonts] ⚠ No se ha podido descargar Meslo, pero sigo." >&2
     fi
   fi
 
-  # Si hay GNOME Terminal, intenta ajustar fuente por defecto
   if has_schema "org.gnome.Terminal.ProfilesList"; then
     echo "[Fonts] Configurando Meslo en GNOME Terminal…"
     local PROF_ID PROF_PATH CURR_FONT WANT_FONT
@@ -544,18 +591,18 @@ install_meslo_nerdfont() {
       WANT_FONT="${FAMILY} 12"
     fi
 
-    if gsettings list-keys org.gnome.Console | grep -qx "use-system-font"; then
+    if gsettings list-keys org.gnome.Console 2>/dev/null | grep -qx "use-system-font"; then
       gsettings set org.gnome.Console use-system-font false || true
     fi
 
-    if gsettings list-keys org.gnome.Console | grep -qx "custom-font"; then
+    if gsettings list-keys org.gnome.Console 2>/dev/null | grep -qx "custom-font"; then
       gsettings set org.gnome.Console custom-font "$WANT_FONT" || true
       echo "[Fonts] GNOME Console → ${WANT_FONT}"
-    elif gsettings list-keys org.gnome.Console | grep -qx "font"; then
+    elif gsettings list-keys org.gnome.Console 2>/dev/null | grep -qx "font"; then
       gsettings set org.gnome.Console font "$WANT_FONT" || true
       echo "[Fonts] GNOME Console (key font) → ${WANT_FONT}"
     else
-      echo "[Fonts] ⚠ org.gnome.Console no expone ni custom-font ni font; Meslo está instalada pero tendrás que elegirla a mano." >&2
+      echo "[Fonts] ⚠ org.gnome.Console no expone custom-font/font; tendrás que elegirla a mano." >&2
     fi
 
   elif has_ptyxis; then
@@ -566,20 +613,16 @@ install_meslo_nerdfont() {
     else
       WANT_FONT="${FAMILY} 12"
     fi
-
-    # Ptyxis tiene font global en org.gnome.Ptyxis
     gsettings set org.gnome.Ptyxis use-system-font false || true
     gsettings set org.gnome.Ptyxis font-name "$WANT_FONT" || true
     echo "[Fonts] Ptyxis → $WANT_FONT"
-
   else
-    echo "[Fonts] No se ha detectado GNOME Terminal, GNOME Console ni Ptyxis con schemas conocidos. Meslo está instalada, pero no ajusto ninguna terminal por defecto."
+    echo "[Fonts] No detecto terminal GNOME conocida. Meslo instalada, pero no ajusto fuente automáticamente."
   fi
 }
 
 install_meslo_nerdfont
 
-# Si estamos en un escritorio GNOME, usa Meslo como monospace global
 if has_cmd gsettings && gsettings list-schemas 2>/dev/null | grep -qx 'org.gnome.desktop.interface'; then
   if fc-list | grep -qi 'MesloLGS Nerd Font Mono'; then
     gsettings set org.gnome.desktop.interface monospace-font-name 'MesloLGS Nerd Font Mono 12' || true
@@ -590,16 +633,14 @@ if has_cmd gsettings && gsettings list-schemas 2>/dev/null | grep -qx 'org.gnome
 fi
 
 # ==============================================================================
-# 4) ESCRITURA FINAL EN ~/.bashrc y ~/.zshrc
+# 16) ESCRITURA FINAL EN ~/.bashrc y ~/.zshrc
 # ==============================================================================
 write_managed_block "$HOME/.bashrc" "$BASH_RC"
 write_managed_block "$HOME/.zshrc"  "$ZSH_RC"
 
 # ==============================================================================
-# 5) CLEANUP
+# 17) CLEANUP
 # ==============================================================================
-
-sudo apt autoremove -y
-sudo apt clean
+pkg_autoremove_clean
 
 echo "✅ Setup finalizado."
