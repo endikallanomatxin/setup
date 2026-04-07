@@ -155,13 +155,13 @@ else
 fi
 
 # ==============================================================================
-# 3) NEOVIM estable 0.11.x (cross-distro)
-#   - Preferimos tarball oficial y symlink en /usr/local/bin
+# 3) NEOVIM 0.12.1 (cross-distro)
+#   - Tarball oficial versionado y symlink en /usr/local/bin
 # ==============================================================================
-install_neovim_stable_011() {
-  local want_major_minor="0.11"
+install_neovim_0121() {
+  local want_version="0.12.1"
   local arch="x86_64"
-  local url="https://github.com/neovim/neovim-releases/releases/latest/download/nvim-linux-${arch}.tar.gz"
+  local url="https://github.com/neovim/neovim-releases/releases/download/v${want_version}/nvim-linux-${arch}.tar.gz"
   local tmp="/tmp/nvim-linux-${arch}.tar.gz"
   local dst="/opt/nvim"
 
@@ -184,11 +184,11 @@ install_neovim_stable_011() {
 }
 
 NV_CURR="$(nv_ver || true)"
-if [[ ! "$NV_CURR" =~ ^0\.11\. ]]; then
-  echo "[Neovim] Instalando estable 0.11.x (actual: ${NV_CURR:-no instalado})"
-  install_neovim_stable_011
+if [ "$NV_CURR" != "0.12.1" ]; then
+  echo "[Neovim] Instalando 0.12.1 (actual: ${NV_CURR:-no instalado})"
+  install_neovim_0121
 else
-  echo "[Neovim] Ya en 0.11.x → OK ($NV_CURR)"
+  echo "[Neovim] Ya en 0.12.1 → OK ($NV_CURR)"
 fi
 
 # Config de Neovim
@@ -227,6 +227,11 @@ if has_cmd nvim; then
   if ! git config --global --get sequence.editor >/dev/null; then
     git config --global sequence.editor "nvim"
   fi
+
+  git config --global difftool.nvim_difftool.cmd "nvim -c \"packadd nvim.difftool\" -d \"\$LOCAL\" \"\$REMOTE\""
+  git config --global diff.tool "nvim_difftool"
+  git config --global alias.dt "difftool -d"
+  git config --global alias.cdt "!f() { c=\"\${1:-HEAD}\"; git difftool -d \"\$c^\" \"\$c\"; }; f"
 fi
 
 # ==============================================================================
