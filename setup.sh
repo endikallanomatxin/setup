@@ -102,6 +102,7 @@ write_managed_block() {  # write_managed_block <file> <content>
 has_cmd(){ command -v "$1" >/dev/null 2>&1; }
 nv_ver(){ nvim --version 2>/dev/null | sed -n '1{s/.*NVIM v//;s/ .*//;p}'; }
 go_ver(){ go version 2>/dev/null | awk '{print $3}' | sed 's/^go//'; }
+ts_ver(){ tree-sitter --version 2>/dev/null | awk '{print $2}'; }
 
 ver_ge() { # ver_ge <a> <b>  (true si a >= b)
   # sort -V está en coreutils en Ubuntu y Fedora
@@ -308,6 +309,27 @@ append_both <<'EOF'
 # Rust
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 EOF
+
+# ==============================================================================
+# 8.1) TREE-SITTER CLI (requerido por nvim-treesitter main en Neovim 0.12)
+# ==============================================================================
+TS_MIN="0.26.1"
+TS_CURR="$(ts_ver || echo 0)"
+
+if has_cmd tree-sitter && ver_ge "$TS_CURR" "$TS_MIN"; then
+  echo "[tree-sitter] Ya en $TS_CURR (>= $TS_MIN) → OK"
+else
+  echo "[tree-sitter] Instalando tree-sitter-cli >= $TS_MIN con cargo… (actual: $TS_CURR)"
+  cargo install --locked tree-sitter-cli --version 0.26.8
+fi
+
+tree-sitter --version || true
+
+# Si la config de nvim ya está presente, recompila parsers para alinear queries y parser ABI.
+if [ -d "$HOME/.config/nvim" ] && has_cmd nvim && has_cmd tree-sitter; then
+  echo "[nvim-treesitter] Recompilando parsers base para Neovim 0.12…"
+  nvim --headless '+lua require("nvim-treesitter").install({"bash","c","diff","html","lua","luadoc","markdown","markdown_inline","query","vim","vimdoc","java"},{summary=true,force=true}):wait(300000)' +qall! || true
+fi
 
 # ==============================================================================
 # 9) ZSH + plugins (ya instalados arriba). Asegura login shell zsh.
