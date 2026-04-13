@@ -140,7 +140,7 @@ if is_ubuntu_like; then
     git curl make unzip gcc ripgrep xclip zsh \
     zsh-syntax-highlighting zsh-autosuggestions \
     eza fontconfig tmux podman podman-compose \
-    pipx
+    pipx clang
   # Wayland clipboard opcional
   pkg_install wl-clipboard || true
 else
@@ -149,7 +149,7 @@ else
     git curl make unzip gcc ripgrep xclip zsh \
     zsh-syntax-highlighting zsh-autosuggestions \
     eza fontconfig tmux podman \
-    python3-pipx
+    python3-pipx clang
   # En Fedora, podman-compose puede no venir por defecto; intentamos ambos
   pkg_install podman-compose || pkg_install python3-podman-compose || true
   pkg_install wl-clipboard || true
