@@ -11,6 +11,11 @@ if [ "${BASH_SOURCE[0]}" != "$0" ]; then
   return 1 2>/dev/null || exit 1
 fi
 
+if [ "$(id -u)" -eq 0 ]; then
+  echo "No ejecutes este script con sudo. Ejecútalo como usuario normal: bash setup.sh" >&2
+  exit 1
+fi
+
 set -euo pipefail
 
 # ==============================================================================
@@ -332,32 +337,39 @@ if [ -d "$HOME/.config/nvim" ] && has_cmd nvim && has_cmd tree-sitter; then
 fi
 
 # ==============================================================================
-# 9) ZSH + plugins (ya instalados arriba). Asegura login shell zsh.
+# 9) ZSH + plugins. Asegura login shell zsh.
 # ==============================================================================
-if [ "$(getent passwd "$USER" | cut -d: -f7)" != "/usr/bin/zsh" ]; then
-  chsh -s /usr/bin/zsh || true
+ZSH_PATH="$(command -v zsh || true)"
+
+if [ -z "$ZSH_PATH" ]; then
+  echo "[zsh] ERROR: zsh no está instalado o no está en PATH." >&2
+  exit 1
 fi
 
-append_zsh <<'EOF'
-# Historial zsh + opciones
-export HISTFILE="$HOME/.zsh_history"
-export HISTSIZE=50000
-export SAVEHIST=50000
-setopt HIST_IGNORE_ALL_DUPS SHARE_HISTORY
+CURRENT_SHELL="$(getent passwd "$USER" | cut -d: -f7)"
 
-# Completion
-autoload -Uz compinit
-compinit
+if [ "$CURRENT_SHELL" != "$ZSH_PATH" ]; then
+  echo "[zsh] Cambiando shell de login para $USER: $CURRENT_SHELL → $ZSH_PATH"
 
-# Autosuggestions (highlight al final del archivo)
-# Ubuntu/Fedora suelen usar estas rutas:
-if [ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]; then
-  source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+  # chsh exige que la shell esté listada en /etc/shells
+  if ! grep -qxF "$ZSH_PATH" /etc/shells; then
+    echo "[zsh] Añadiendo $ZSH_PATH a /etc/shells"
+    echo "$ZSH_PATH" | sudo tee -a /etc/shells >/dev/null
+  fi
+
+  # Más robusto en scripts que chsh interactivo
+  sudo usermod -s "$ZSH_PATH" "$USER"
+
+  NEW_SHELL="$(getent passwd "$USER" | cut -d: -f7)"
+  if [ "$NEW_SHELL" != "$ZSH_PATH" ]; then
+    echo "[zsh] ERROR: no se pudo cambiar la shell. Actual: $NEW_SHELL" >&2
+    exit 1
+  fi
+
+  echo "[zsh] Shell de login cambiada. Se aplicará al cerrar sesión o ejecutando: exec zsh -l"
+else
+  echo "[zsh] Ya es la shell de login → OK ($CURRENT_SHELL)"
 fi
-ZSH_AUTOSUGGEST_USE_ASYNC=1
-ZSH_AUTOSUGGEST_STRATEGY=(history completion)
-ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
-EOF
 
 # ==============================================================================
 # 10) STARSHIP
