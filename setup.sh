@@ -473,12 +473,14 @@ set -g message-style         "bg=#1f2335,fg=#c0caf5"
 set -g message-command-style "bg=#1f2335,fg=#c0caf5"
 set -g mode-style            "bg=#33467c,fg=#c0caf5"
 
-##### Copia al portapapeles #########################################
-# X11:
-bind -T copy-mode-vi MouseDragEnd1Pane send -X copy-pipe-and-cancel "xclip -selection clipboard -in"
-bind -T copy-mode    MouseDragEnd1Pane send -X copy-pipe-and-cancel "xclip -selection clipboard -in"
-if-shell "command -v xclip >/dev/null 2>&1" \
-  'bind -T copy-mode-vi y send -X copy-pipe-and-cancel "xclip -sel clip -i"'
+##### Copia al portapapeles por SSH / OSC52 ####################################
+
+set -g set-clipboard on
+set -as terminal-features ",*:clipboard"
+
+bind -T copy-mode-vi y send -X copy-pipe-and-cancel "tmux load-buffer -w -"
+bind -T copy-mode-vi MouseDragEnd1Pane send -X copy-pipe-and-cancel "tmux load-buffer -w -"
+bind -T copy-mode MouseDragEnd1Pane send -X copy-pipe-and-cancel "tmux load-buffer -w -"
 
 # Wayland (si quieres):
 # if-shell "command -v wl-copy >/dev/null 2>&1" \
