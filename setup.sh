@@ -201,8 +201,11 @@ fi
 mkdir -p "$HOME/.config"
 if [ ! -d "$HOME/.config/nvim" ]; then
   git clone https://github.com/endikallanomatxin/nvim.git "$HOME/.config/nvim"
+elif [ -d "$HOME/.config/nvim/.git" ]; then
+  echo "[Neovim] ~/.config/nvim ya existe → actualizo con git pull --ff-only"
+  git -C "$HOME/.config/nvim" pull --ff-only
 else
-  echo "[Neovim] ~/.config/nvim ya existe → skip clone"
+  echo "[Neovim] ~/.config/nvim existe pero no es un repo git → no lo modifico" >&2
 fi
 
 # ==============================================================================
