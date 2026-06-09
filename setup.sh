@@ -18,6 +18,36 @@ fi
 
 set -euo pipefail
 
+BACKUP_CONFIGS=0
+
+usage() {
+  cat <<'EOF'
+Uso: bash setup.sh [--backup]
+
+Opciones:
+  --backup   Antes de sobrescribir configs gestionadas por el setup, guarda
+             una copia con sufijo .bak.YYYYMMDDHHMMSS.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --backup)
+      BACKUP_CONFIGS=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Opción no reconocida: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
 # ==============================================================================
 # 0) DETECCIÓN DE DISTRO + ABSTRACCIÓN DE PAQUETES
 # ==============================================================================
@@ -86,10 +116,22 @@ append_bash() { local block; block="$(cat)"; BASH_RC+=$'\n'"$block"$'\n'; }
 append_zsh()  { local block; block="$(cat)"; ZSH_RC+=$'\n'"$block"$'\n'; }
 append_both() { local block; block="$(cat)"; BASH_RC+=$'\n'"$block"$'\n'; ZSH_RC+=$'\n'"$block"$'\n'; }
 
+backup_file_if_requested() {  # backup_file_if_requested <file> <label>
+  local file="$1" label="$2" backup
+  if [ "$BACKUP_CONFIGS" != "1" ] || [ ! -f "$file" ]; then
+    return 0
+  fi
+
+  backup="${file}.bak.$(date +%Y%m%d%H%M%S)"
+  cp -f "$file" "$backup"
+  echo "[$label] Backup de $file en $backup"
+}
+
 write_managed_block() {  # write_managed_block <file> <content>
   local file="$1" content="$2"
   local START="# >>> ENDIKA MANAGED START >>>"
   local END="# <<< ENDIKA MANAGED END <<<"
+  backup_file_if_requested "$file" "rc"
   touch "$file"
   awk -v s="$START" -v e="$END" '
     $0==s {inside=1; next}
@@ -434,7 +476,7 @@ STAR_CFG="$HOME/.config/starship.toml"
 mkdir -p "$HOME/.config"
 
 if has_cmd starship; then
-  [ -f "$STAR_CFG" ] && cp -f "$STAR_CFG" "$STAR_CFG.bak"
+  backup_file_if_requested "$STAR_CFG" "Starship"
   starship preset nerd-font-symbols -o "$STAR_CFG"
 else
   echo "[Starship] No se ha encontrado starship → no genero starship.toml"
@@ -472,11 +514,7 @@ EOF
 # ==============================================================================
 # 12) TMUX (config)
 # ==============================================================================
-if [ -f "$HOME/.tmux.conf" ]; then
-  TMUX_BACKUP="$HOME/.tmux.conf.bak.$(date +%Y%m%d%H%M%S)"
-  cp -f "$HOME/.tmux.conf" "$TMUX_BACKUP"
-  echo "[tmux] ~/.tmux.conf existe → backup en $TMUX_BACKUP"
-fi
+backup_file_if_requested "$HOME/.tmux.conf" "tmux"
 
 cat > "$HOME/.tmux.conf" <<'TMUX'
 ##### Terminal y color verdadero ###############################################
@@ -573,6 +611,7 @@ if command -v dconf >/dev/null 2>&1; then
 
     PTYXIS_PALETTE_DIR="$HOME/.local/share/org.gnome.Ptyxis/palettes"
     mkdir -p "$PTYXIS_PALETTE_DIR"
+    backup_file_if_requested "$PTYXIS_PALETTE_DIR/tokyo-night.palette" "Ptyxis"
 
     cat > "$PTYXIS_PALETTE_DIR/tokyo-night.palette" <<'EOF'
 [Palette]
@@ -620,6 +659,7 @@ fi
 # 14) Podman: config
 # ==============================================================================
 mkdir -p "$HOME/.config/containers"
+backup_file_if_requested "$HOME/.config/containers/containers.conf" "Podman"
 cat > "$HOME/.config/containers/containers.conf" <<'EOF'
 [engine]
 compose_warning_logs = false
