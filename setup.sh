@@ -208,6 +208,11 @@ else
   echo "[Neovim] ~/.config/nvim existe pero no es un repo git → no lo modifico" >&2
 fi
 
+if [ -d "$HOME/.config/nvim" ] && has_cmd nvim; then
+  echo "[Neovim] Sincronizando plugins con lazy.nvim…"
+  nvim --headless "+Lazy! sync" +qa || true
+fi
+
 # ==============================================================================
 # 4) pipx: djlint + PATH
 # ==============================================================================
