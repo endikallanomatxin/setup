@@ -574,7 +574,7 @@ set -s set-clipboard on
 set -as terminal-features ",*:clipboard"
 
 # Fallback explícito para terminales donde terminal-features no baste.
-set -as terminal-overrides ",*:Ms=\E]52;c;%p2%s\7"
+set -as terminal-overrides ',*:Ms=\E]52;c;%p2%s\007'
 
 # Copiar selección de tmux al buffer de tmux y al clipboard externo.
 bind -T copy-mode-vi y send -X copy-pipe-and-cancel "tmux load-buffer -w -"
