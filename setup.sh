@@ -372,6 +372,44 @@ else
 fi
 
 # ==============================================================================
+# 9.1) HISTORIAL DE SHELL (bash + zsh)
+# ==============================================================================
+# Bash:
+# - Guarda el historial en ~/.bash_history.
+# - Aumenta el tamaño del historial en memoria y en disco.
+# - Ignora comandos duplicados y comandos que empiezan por espacio.
+# - Añade cada comando al fichero al terminarlo, sin esperar a cerrar la shell.
+append_bash <<'EOF'
+HISTFILE="$HOME/.bash_history"
+HISTSIZE=100000
+HISTFILESIZE=200000
+HISTCONTROL=ignoredups:ignorespace
+
+shopt -s histappend
+PROMPT_COMMAND="history -a${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+EOF
+
+# Zsh:
+# - Guarda el historial en ~/.zsh_history.
+# - Aumenta el tamaño del historial en memoria y en disco.
+# - EXTENDED_HISTORY añade timestamp y duración de cada comando.
+# - HIST_FCNTL_LOCK evita corrupción del historial con varias shells abiertas.
+# - HIST_IGNORE_DUPS evita duplicados consecutivos.
+# - HIST_IGNORE_SPACE no guarda comandos que empiezan por espacio.
+# - INC_APPEND_HISTORY escribe cada comando al fichero al terminarlo.
+append_zsh <<'EOF'
+HISTFILE="$HOME/.zsh_history"
+HISTSIZE=100000
+SAVEHIST=100000
+
+setopt EXTENDED_HISTORY
+setopt HIST_FCNTL_LOCK
+setopt HIST_IGNORE_DUPS
+setopt HIST_IGNORE_SPACE
+setopt INC_APPEND_HISTORY
+EOF
+
+# ==============================================================================
 # 10) STARSHIP
 # ==============================================================================
 if ! has_cmd starship; then
