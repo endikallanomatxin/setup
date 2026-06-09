@@ -440,12 +440,14 @@ fi
 EOF
 
 append_zsh <<'EOF'
-# Starship en zsh (antes de syntax-highlighting)
 if command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
 fi
 
-# Syntax highlighting SIEMPRE al final (Ubuntu/Fedora suelen usar esta ruta):
+if [ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]; then
+  source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+fi
+
 if [ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]; then
   source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 fi
