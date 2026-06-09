@@ -472,8 +472,13 @@ EOF
 # ==============================================================================
 # 12) TMUX (config)
 # ==============================================================================
-if [ ! -f "$HOME/.tmux.conf" ]; then
-  cat > "$HOME/.tmux.conf" <<'TMUX'
+if [ -f "$HOME/.tmux.conf" ]; then
+  TMUX_BACKUP="$HOME/.tmux.conf.bak.$(date +%Y%m%d%H%M%S)"
+  cp -f "$HOME/.tmux.conf" "$TMUX_BACKUP"
+  echo "[tmux] ~/.tmux.conf existe → backup en $TMUX_BACKUP"
+fi
+
+cat > "$HOME/.tmux.conf" <<'TMUX'
 ##### Terminal y color verdadero ###############################################
 set -g default-terminal "tmux-256color"
 set -as terminal-overrides ",*:Tc"
@@ -523,9 +528,17 @@ set -g mode-style            "bg=#33467c,fg=#c0caf5"
 
 ##### Copia al portapapeles por SSH / OSC52 ####################################
 
-set -g set-clipboard on
+# Permite que tmux escriba al portapapeles del terminal exterior mediante OSC52.
+# "on" también permite que apps dentro de tmux, como nvim, usen OSC52.
+set -s set-clipboard on
+
+# Anuncia soporte de clipboard/OSC52.
 set -as terminal-features ",*:clipboard"
 
+# Fallback explícito para terminales donde terminal-features no baste.
+set -as terminal-overrides ",*:Ms=\E]52;c;%p2%s\7"
+
+# Copiar selección de tmux al buffer de tmux y al clipboard externo.
 bind -T copy-mode-vi y send -X copy-pipe-and-cancel "tmux load-buffer -w -"
 bind -T copy-mode-vi MouseDragEnd1Pane send -X copy-pipe-and-cancel "tmux load-buffer -w -"
 bind -T copy-mode MouseDragEnd1Pane send -X copy-pipe-and-cancel "tmux load-buffer -w -"
@@ -534,7 +547,6 @@ bind -T copy-mode MouseDragEnd1Pane send -X copy-pipe-and-cancel "tmux load-buff
 # if-shell "command -v wl-copy >/dev/null 2>&1" \
 #   'bind -T copy-mode-vi y send -X copy-pipe-and-cancel "wl-copy"'
 TMUX
-fi
 
 # ==============================================================================
 # 13) Tokyo Night según terminal GNOME
