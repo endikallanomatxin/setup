@@ -587,26 +587,29 @@ bind -T copy-mode MouseDragEnd1Pane send -X copy-pipe-and-cancel "tmux load-buff
 TMUX
 
 # ==============================================================================
-# 13) Tokyo Night según terminal GNOME
+# 13) Tokyo Night en todos los terminales GNOME detectados
 # ==============================================================================
 if command -v dconf >/dev/null 2>&1; then
+
   if has_schema "org.gnome.Terminal.ProfilesList"; then
     echo "[GNOME Terminal] Detectado → aplico Tokyo Night"
 
     if curl -fsSLo "$HOME/tokyonight-gnome-terminal.txt" \
       https://raw.githubusercontent.com/bftelman/tokyonight-gnome-terminal/master/tokyonight-gnome-terminal.txt; then
       if ! dconf load /org/gnome/terminal/ < "$HOME/tokyonight-gnome-terminal.txt"; then
-        echo "[GNOME Terminal] ⚠ No se ha podido aplicar Tokyo Night (dconf error), pero sigo." >&2
+        echo "[GNOME Terminal] ⚠ No se ha podido aplicar Tokyo Night." >&2
       fi
     else
-      echo "[GNOME Terminal] ⚠ No se ha podido descargar Tokyo Night, pero sigo." >&2
+      echo "[GNOME Terminal] ⚠ No se ha podido descargar Tokyo Night." >&2
     fi
+  fi
 
-  elif has_schema "org.gnome.Console"; then
+  if has_schema "org.gnome.Console"; then
     echo "[Console] Detectada GNOME Console (kgx) → activo tema oscuro"
     gsettings set org.gnome.Console theme 'prefer-dark' || true
+  fi
 
-  elif has_ptyxis; then
+  if has_ptyxis; then
     echo "[Ptyxis] Detectado → aplico Tokyo Night"
 
     PTYXIS_PALETTE_DIR="$HOME/.local/share/org.gnome.Ptyxis/palettes"
@@ -643,16 +646,16 @@ Color15=#c0caf5
 EOF
 
     PTYXIS_UUID="$(dconf read /org/gnome/Ptyxis/default-profile-uuid 2>/dev/null | tr -d \')"
+
     if [ -n "${PTYXIS_UUID:-}" ]; then
       PROFILE_PATH="org.gnome.Ptyxis.Profile:/org/gnome/Ptyxis/Profiles/${PTYXIS_UUID}/"
       gsettings set "$PROFILE_PATH" palette 'Tokyo Night' || true
       gsettings set "$PROFILE_PATH" label 'Tokyo Night' || true
     else
-      echo "[Ptyxis] ⚠ No hay perfil por defecto aún (abre Ptyxis una vez) → salto ajustes del perfil." >&2
+      echo "[Ptyxis] ⚠ No hay perfil por defecto aún; abre Ptyxis una vez." >&2
     fi
-  else
-    echo "[Terminal] No detecto GNOME Terminal / Console / Ptyxis → salto tema."
   fi
+
 fi
 
 # ==============================================================================
@@ -723,7 +726,9 @@ install_meslo_nerdfont() {
       echo "[Fonts] GNOME Terminal ya usa ${WANT_FONT} → OK"
     fi
 
-  elif has_schema "org.gnome.Console"; then
+  fi
+
+  if has_schema "org.gnome.Console"; then
     echo "[Fonts] Configurando Meslo en GNOME Console (kgx)…"
     local WANT_FONT
     if fc-list | grep -qi "$FAMILY_MONO"; then
@@ -745,8 +750,9 @@ install_meslo_nerdfont() {
     else
       echo "[Fonts] ⚠ org.gnome.Console no expone custom-font/font; tendrás que elegirla a mano." >&2
     fi
+  fi
 
-  elif has_ptyxis; then
+  if has_ptyxis; then
     echo "[Fonts] Configurando Meslo en Ptyxis…"
     local WANT_FONT
     if fc-list | grep -qi "$FAMILY_MONO"; then
@@ -757,8 +763,6 @@ install_meslo_nerdfont() {
     gsettings set org.gnome.Ptyxis use-system-font false || true
     gsettings set org.gnome.Ptyxis font-name "$WANT_FONT" || true
     echo "[Fonts] Ptyxis → $WANT_FONT"
-  else
-    echo "[Fonts] No detecto terminal GNOME conocida. Meslo instalada, pero no ajusto fuente automáticamente."
   fi
 }
 
