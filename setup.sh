@@ -521,6 +521,11 @@ cat > "$HOME/.tmux.conf" <<'TMUX'
 set -g default-terminal "tmux-256color"
 set -as terminal-overrides ",*:Tc"
 
+# Mostrar en la pestaña del terminal el título del panel activo.
+set -gq allow-set-title on
+set -g set-titles on
+set -g set-titles-string "#{pane_title}"
+
 ##### Usabilidad ###############################################################
 set -g mouse on
 setw -g mode-keys vi

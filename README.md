@@ -21,12 +21,28 @@ After running the setup script, restart the computer to see all the changes appl
 
 After this, you might also want to:
 
-- Login into github
+- Install Bitwarden
+
+- Install Tailscale
+
+- Install Codex
+
+- Login into Github
 
     ```sh
     sudo apt install gh
     gh auth login
     ```
 
-- Configure github copilot in neovim. Type `:Copilot`.
+- Configure Github Copilot in Neovim. Type `:Copilot`.
+
+- Install Zig
+
+- Install uv
+
+- Install Flatpak
+
+- Install Gearlever
+
+- Install Handy
 
